@@ -4,7 +4,7 @@ import axios from 'axios';
 import './App.css'; 
 
 // URL de tu API local (Backend)
-const API_URL = 'https://generador-de-resumen-ia.onrender.com/api/summarize';
+const API_URL = 'https://resumen-noticias-ia.onrender.com/api/summarize';
 function App() {
   const [url, setUrl] = useState<string>('');
   const [summary, setSummary] = useState<string>('');
