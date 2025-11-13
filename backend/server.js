@@ -2,7 +2,7 @@
 import { GoogleGenAI } from '@google/genai';
 import express from 'express';
 import cors from 'cors';
-import 'dotenv/config'; // Importa y configura las variables de entorno para ES Modules
+import 'dotenv/config'; // Carga las variables de entorno para ES Modules
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 
@@ -11,11 +11,10 @@ import * as cheerio from 'cheerio';
 // ====================================================================
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// Verificación de clave: CRUCIAL para evitar fallos silenciosos en Render
+// Verificación de clave: CRUCIAL para evitar fallos silenciosos
 if (!GEMINI_API_KEY) {
     console.error("=========================================================================");
     console.error("ERROR CRÍTICO: La variable GEMINI_API_KEY no está configurada.");
-    console.error("Asegúrate de tenerla en la configuración de Render.");
     console.error("=========================================================================");
     process.exit(1); 
 }
@@ -29,6 +28,7 @@ const whitelist = [
     'http://localhost:3000', 
     'http://localhost:5173', 
     'https://resumen-noticias-ia.onrender.com',
+    // TU DOMINIO DE VERSEL INSERTADO AQUÍ
     'https://resumen-noticias-ia-assq722oj-lilas-projects-d4fef991.vercel.app' 
 ];
 
@@ -57,13 +57,14 @@ async function generateSummary(url) {
         // 1. Web Scraping para obtener texto
         const { data } = await axios.get(url, {
             headers: {
-                'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
+                // CORRECCIÓN FINAL: Simular un navegador Chrome real para evitar el error 403 Forbidden
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
             },
             timeout: 20000 // Aumentado a 20s para dar tiempo al scraping y a la red
         });
         
         const $ = cheerio.load(data);
-        // Extracción optimizada y filtrada de texto
+        // Extracción optimizada de texto
         const textContent = $('p, h1, h2, h3, h4').map((i, el) => $(el).text()).get().join('\n').trim();
         
         if (textContent.length < 100) {
@@ -81,13 +82,13 @@ async function generateSummary(url) {
 
         return response.text.trim();
     } catch (error) {
-        // Manejo de errores de Axios (Scraping)
+        // Manejo de errores específicos (403, 404, Timeout)
         if (error.response) {
             console.error(`Error de Scraping: HTTP ${error.response.status}`);
             throw new Error(`El sitio web respondió con error: Código ${error.response.status}.`);
         } else if (error.code === 'ECONNABORTED' || error.code === 'ERR_SOCKET_TIMEOUT') {
              console.error(`Error de Timeout: ${error.message}`);
-             throw new Error('Timeout al intentar acceder a la URL.');
+             throw new Error('Timeout al intentar acceder a la URL. Intenta con una URL diferente.');
         } else {
             console.error('Error al generar resumen:', error.message);
             throw new Error(`Fallo en el procesamiento: ${error.message}`);
