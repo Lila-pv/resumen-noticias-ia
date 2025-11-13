@@ -2,52 +2,72 @@
 import { GoogleGenAI } from '@google/genai';
 import express from 'express';
 import cors from 'cors';
-import 'dotenv/config'; // <-- CORREGIDO: Importa y configura las variables de entorno
+import 'dotenv/config'; // Importa y configura las variables de entorno para ES Modules
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 
-// Obtener la clave de Gemini del entorno
+// ====================================================================
+// 1. CONFIGURACIÓN CRÍTICA
+// ====================================================================
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// Verificación de la clave: Crucial para el diagnóstico de fallos
+// Verificación de clave: CRUCIAL para evitar fallos silenciosos en Render
 if (!GEMINI_API_KEY) {
     console.error("=========================================================================");
     console.error("ERROR CRÍTICO: La variable GEMINI_API_KEY no está configurada.");
-    console.error("Asegúrate de tenerla en el archivo .env (local) y en la configuración de Render.");
+    console.error("Asegúrate de tenerla en la configuración de Render.");
     console.error("=========================================================================");
-    // Si la clave falta, forzamos la salida para evitar que el servidor se cuelgue silenciosamente
     process.exit(1); 
 }
 
-// Inicializa Gemini.
 const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 const app = express();
-const port = process.env.PORT || 3000; // Usa la variable PORT proporcionada por Render o 3000
+const port = process.env.PORT || 3000; 
 
-// Middleware para JSON y CORS 
+// Lista blanca de dominios permitidos para CORS
+const whitelist = [
+    'http://localhost:3000', 
+    'http://localhost:5173', 
+    'https://resumen-noticias-ia.onrender.com',
+    'https://resumen-noticias-ia-assq722oj-lilas-projects-d4fef991.vercel.app' 
+];
+
+// Configuración dinámica de CORS
+const corsOptions = {
+    origin: function (origin, callback) {
+        if (!origin || whitelist.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error('Acceso CORS no permitido por el servidor.'), false);
+        }
+    }
+};
+
+// ====================================================================
+// 2. MIDDLEWARE
+// ====================================================================
 app.use(express.json());
-app.use(cors({
-    origin: ['http://localhost:3000', 'http://localhost:5173', 'https://resumen-noticias-ia.onrender.com'] // Añade tu dominio de Render y localhost
-})); 
+app.use(cors(corsOptions)); 
 
-// Función para obtener contenido y resumir con Gemini
+// ====================================================================
+// 3. LÓGICA DE RESUMEN
+// ====================================================================
 async function generateSummary(url) {
     try {
         // 1. Web Scraping para obtener texto
         const { data } = await axios.get(url, {
             headers: {
-                // Simula un agente de navegador/bot para evitar bloqueos simples
                 'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
             },
-            timeout: 15000 // Añadido timeout de 15 segundos para Axios (para evitar cuelgues)
+            timeout: 20000 // Aumentado a 20s para dar tiempo al scraping y a la red
         });
         
         const $ = cheerio.load(data);
-        // Extracción de párrafos
-        const textContent = $('p').map((i, el) => $(el).text()).get().join('\n');
+        // Extracción optimizada y filtrada de texto
+        const textContent = $('p, h1, h2, h3, h4').map((i, el) => $(el).text()).get().join('\n').trim();
         
-        if (textContent.length < 50) {
-            throw new Error("Contenido insuficiente o bloqueado por el sitio web.");
+        if (textContent.length < 100) {
+            throw new Error("Contenido insuficiente o el sitio web bloqueó el scraping.");
         }
         
         // 2. Prompt para Gemini
@@ -61,12 +81,23 @@ async function generateSummary(url) {
 
         return response.text.trim();
     } catch (error) {
-        console.error('Error al generar resumen:', error.message);
-        throw new Error(`Fallo en el procesamiento: ${error.message}`);
+        // Manejo de errores de Axios (Scraping)
+        if (error.response) {
+            console.error(`Error de Scraping: HTTP ${error.response.status}`);
+            throw new Error(`El sitio web respondió con error: Código ${error.response.status}.`);
+        } else if (error.code === 'ECONNABORTED' || error.code === 'ERR_SOCKET_TIMEOUT') {
+             console.error(`Error de Timeout: ${error.message}`);
+             throw new Error('Timeout al intentar acceder a la URL.');
+        } else {
+            console.error('Error al generar resumen:', error.message);
+            throw new Error(`Fallo en el procesamiento: ${error.message}`);
+        }
     }
 }
 
-// Endpoint POST: /api/summarize
+// ====================================================================
+// 4. ENDPOINT
+// ====================================================================
 app.post('/api/summarize', async (req, res) => {
     const { url } = req.body;
 
@@ -78,11 +109,13 @@ app.post('/api/summarize', async (req, res) => {
         const summary = await generateSummary(url);
         res.json({ success: true, summary: summary });
     } catch (error) {
-        // En caso de error, el log de Render mostrará el mensaje del error
         res.status(500).json({ success: false, error: error.message });
     }
 });
 
+// ====================================================================
+// 5. INICIO DEL SERVIDOR
+// ====================================================================
 app.listen(port, () => {
     console.log(`\nServidor Gemini corriendo en http://localhost:${port}`);
 });
